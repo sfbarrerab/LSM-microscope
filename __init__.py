@@ -435,6 +435,7 @@ class MicroscopeControlGUI(QMainWindow):
 
     def focus_interpolation(self):
         # TODO
+        # Linear interpolation implementation
         return 0
 
     def set_encoders_to_cero(self):
