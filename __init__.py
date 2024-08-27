@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSlider, QPushButton, QLineEdit, QGridLayout, QMainWindow
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSlider, QPushButton, QLineEdit, QGridLayout, QMainWindow, QStatusBar
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtCore import Qt, QTimer, QMetaObject
 import threading
@@ -40,6 +40,9 @@ class MicroscopeControlGUI(QMainWindow):
         self.lens = Lens('COM5', debug=False)
         self.cam = pco.Camera(interface="USB 3.0")
         self.arduino = serial.Serial(port="COM6", baudrate=115200, timeout=1)
+
+        # calibration matrix for focal length
+        self.lens_calib = np.zeros((2,2))
 
         self.initUI()
 
@@ -104,7 +107,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        current_layout, self.current_slider, self.current_text = self.create_slider_with_text('Current', -150, 150, 0, self.change_optotune_current)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -500, 500, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -123,7 +126,16 @@ class MicroscopeControlGUI(QMainWindow):
         self.stop_stepper_motor_btn = QPushButton("STOP stepper motor")
         self.stop_stepper_motor_btn.clicked.connect(lambda: self.send_command_arduino("h?"))
 
+        # Optotune calibration btns
+        self.get_lens_calib_point_btn = QPushButton("Get Lens Calibration Point")
+        self.get_lens_calib_point_btn.clicked.connect(self.get_lens_calib_point)
 
+        self.clear_lens_calib_btn = QPushButton("Clear Lens Calibration")
+        self.clear_lens_calib_btn.clicked.connect(self.clear_lens_calib)
+        self.clear_lens_calib_btn.setDisabled(True)
+
+        # Create status bar
+        self.create_status_bar() 
 
 
         light_house_layout = QGridLayout()
@@ -132,6 +144,8 @@ class MicroscopeControlGUI(QMainWindow):
         light_house_layout.addWidget(self.move_ccw_stepper_motor_btn,1,0)
         light_house_layout.addWidget(self.move_cw_stepper_motor_btn,1,1)
         light_house_layout.addWidget(self.stop_stepper_motor_btn)
+        light_house_layout.addWidget(self.get_lens_calib_point_btn,3,0)
+        light_house_layout.addWidget(self.clear_lens_calib_btn,3,1)
 
         # Acquisition z start/end positions
         self.z_max_label = QLabel('Z-Max')
@@ -163,7 +177,7 @@ class MicroscopeControlGUI(QMainWindow):
         settings_layout.addLayout(x_layout)
         settings_layout.addLayout(y_layout)
         settings_layout.addLayout(z_layout)
-        settings_layout.addLayout(current_layout)
+        settings_layout.addLayout(mili_diopter_layout)
         settings_layout.addLayout(acceleration_layout)
         settings_layout.addLayout(amplitude_layout)
         settings_layout.addLayout(light_house_layout)
@@ -268,8 +282,8 @@ class MicroscopeControlGUI(QMainWindow):
 
         return hbox, slider, text_box
 
-    def change_optotune_current(self, value):
-        thread = threading.Thread(target=self.lens.set_current, args=([value]))
+    def change_optotune_diopter(self, value):
+        thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
         thread.start()
 
     def send_acc_serial_command(self, value):
@@ -446,6 +460,71 @@ class MicroscopeControlGUI(QMainWindow):
         self.y_slider.setValue(0)
         self.z_text.setText(str(0))
         self.z_slider.setValue(0)
+
+
+    def get_lens_calib_point(self):
+        if (np.sum(self.lens_calib)==0): # check if diagonal sum is zero
+            target_row = 0
+        else:
+            target_row = 1
+        
+        self.lens_calib[target_row,0] = self.controller_mcm.get_position_um(2)   # get z position
+        self.lens_calib[target_row,1] = self.lens.get_diopter()
+        
+        if target_row == 0:
+            self.set_calibration_status_indicator(1) # set calib indicator to yellow once one line is filled
+            self.clear_lens_calib_btn.setDisabled(False)# enable the clear calibration button
+        else:
+            self.is_lens_calibrated = True # set the calibration flag to be true once two point calibration has been performed
+            self.set_calibration_status_indicator(2) # set calib idicator to green once both lines are filled
+            self.get_lens_calib_point_btn.setDisabled(True) # disable the get calibration point button
+            # self.lens_calibration_line_coefficients = np.polyfit(self.lens_calib[:,0],self.lens_calib[:,1],1)
+
+    
+    # state = 0 => not calibrated
+    # state = 1 => calibration in process
+    # state = 2 => calibration completed
+    def set_calibration_status_indicator(self, state):
+        match state:
+            case 0:
+                self.calib_led_indicator.setStyleSheet("border : 2px solid black; background-color : red")
+            case 1:
+                self.calib_led_indicator.setStyleSheet("border : 2px solid black; background-color : yellow")
+            case 2:
+                self.calib_led_indicator.setStyleSheet("border : 2px solid black; background-color : green")
+
+
+    def clear_lens_calib(self):  
+        self.lens_calib = np.zeros((2,2)) #reset lens calib to 0,0;0,0
+        self.is_lens_calibrated = False 
+        self.set_calibration_status_indicator(0) # reset calib indicator to uncalibrated
+        self.get_lens_calib_point_btn.setDisabled(False) # re-enable the get calibration point button
+        self.clear_lens_calib_btn.setDisabled(True) # disable the clear calibration button
+    
+    def create_status_bar(self):
+        self.calib_led_indicator = QPushButton()
+        self.calib_led_indicator.setStyleSheet("border : 2px solid black; background-color : red")
+        self.status_bar = QStatusBar()
+        
+        self.status_bar.addPermanentWidget(QLabel("Lens calibration status: "))
+        self.status_bar.addPermanentWidget(self.calib_led_indicator)
+
+        self.status_bar.addPermanentWidget(QLabel("Current stage position: "))
+        
+        
+        self.status_bar.addPermanentWidget(QLabel("X="))
+        self.position_indicator_X = QLabel("0 ")
+        self.status_bar.addPermanentWidget(self.position_indicator_X) 
+        self.status_bar.addPermanentWidget(QLabel("Y="))
+        self.position_indicator_Y = QLabel("0 ")
+        self.status_bar.addPermanentWidget(self.position_indicator_Y) 
+        self.status_bar.addPermanentWidget(QLabel("Z="))
+        self.position_indicator_Z = QLabel("0 ")
+        self.status_bar.addPermanentWidget(self.position_indicator_Z) 
+        self.status_bar.addPermanentWidget(QLabel(""),1) #this is a buffer to align content to the left
+        self.setStatusBar(self.status_bar)
+
+        
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
