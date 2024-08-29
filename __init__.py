@@ -41,8 +41,11 @@ class MicroscopeControlGUI(QMainWindow):
         self.cam = pco.Camera(interface="USB 3.0")
         self.arduino = serial.Serial(port="COM6", baudrate=115200, timeout=1)
 
-        # calibration matrix for focal length
+        # optotune calibration variables
         self.lens_calib = np.zeros((2,2))
+        self.calibration_status = 0
+        self.c1_linear_regresion = 0
+        self.c2_linear_regresion = 0
 
         self.initUI()
 
@@ -97,7 +100,6 @@ class MicroscopeControlGUI(QMainWindow):
         # Camera plot thorugh a canvas
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_canvas)
-        #self.timer.start(100)  # 10 frames per second
 
         self.init_live_acquisition()
 
@@ -282,9 +284,12 @@ class MicroscopeControlGUI(QMainWindow):
 
         return hbox, slider, text_box
 
-    def change_optotune_diopter(self, value):
-        thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
-        thread.start()
+    def change_optotune_diopter(self, value, blocking = False):
+        if blocking == True:
+            self.lens.set_diopter((float)(value/1000.0))
+        else:
+            thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
+            thread.start()
 
     def send_acc_serial_command(self, value):
         command = "a?" + str(value)
@@ -310,7 +315,7 @@ class MicroscopeControlGUI(QMainWindow):
         except ValueError:
             pass
 
-    def update_ui_elements(self, channel, value):
+    def update_xyz_ui_elements(self, channel, value):
         if channel == 0:
             new_value = value + int(self.x_text.text())
             self.x_text.setText(str(new_value))
@@ -328,16 +333,16 @@ class MicroscopeControlGUI(QMainWindow):
         self.joystick_layout = QGridLayout()
 
         up_button = QPushButton('X↑')
-        up_button.clicked.connect(lambda: self.move_stage_2(0, 1))
+        up_button.clicked.connect(lambda: self.move_stage_with_btns(0, 1))
 
         down_button = QPushButton('X↓')
-        down_button.clicked.connect(lambda: self.move_stage_2(0, -1))
+        down_button.clicked.connect(lambda: self.move_stage_with_btns(0, -1))
 
         left_button = QPushButton('←Y')
-        left_button.clicked.connect(lambda: self.move_stage_2(1, -1))
+        left_button.clicked.connect(lambda: self.move_stage_with_btns(1, -1))
 
         right_button = QPushButton('Y→')
-        right_button.clicked.connect(lambda: self.move_stage_2(1, 1))
+        right_button.clicked.connect(lambda: self.move_stage_with_btns(1, 1))
 
         self.joystick_layout.addWidget(up_button, 0, 1)
         self.joystick_layout.addWidget(left_button, 1, 0)
@@ -345,10 +350,10 @@ class MicroscopeControlGUI(QMainWindow):
         self.joystick_layout.addWidget(down_button, 2, 1)
 
         z_up_button = QPushButton('Z↑')
-        z_up_button.clicked.connect(lambda: self.move_stage_2(2, 1))
+        z_up_button.clicked.connect(lambda: self.move_stage_with_btns(2, 1))
 
         z_down_button = QPushButton('Z↓')
-        z_down_button.clicked.connect(lambda: self.move_stage_2(2, -1))
+        z_down_button.clicked.connect(lambda: self.move_stage_with_btns(2, -1))
 
         self.joystick_layout.addWidget(z_up_button, 0, 3)
         self.joystick_layout.addWidget(z_down_button, 2, 3)
@@ -360,11 +365,11 @@ class MicroscopeControlGUI(QMainWindow):
         else:
             self.controller_mcm.move_um(channel,value,False)
 
-    def move_stage_2(self, channel, direction):
+    def move_stage_with_btns(self, channel, direction):
         move_value = default_um_btn_move * direction
         thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, default_um_btn_move * direction, True))
         thread.start()
-        self.update_ui_elements(channel, move_value)
+        self.update_xyz_ui_elements(channel, move_value)
 
     def send_command_arduino(self, command):
         self.arduino.write(bytes(command, 'utf-8'))
@@ -385,8 +390,15 @@ class MicroscopeControlGUI(QMainWindow):
         except ValueError:
             print("Invalid Z values or Z step")
             return
+        
+        if self.calibration_status != 2:
+            print("Optotune calibration is not completed")
+            return
+        
+        # get the coefficientes of the linear regression
+        self.linear_interpolation_optotune()
 
-        self.acquisition_running = True
+        self.run_acquisition = True
         self.send_command_arduino("s?")
 
         # Stop the function that update the canvas
@@ -396,18 +408,21 @@ class MicroscopeControlGUI(QMainWindow):
         self.cam.stop()
 
         for z in range(z_min, z_max + z_step, z_step):
-            if not self.acquisition_running:
+            # Stop if the "stop acquisition" btn is pressed
+            if not self.run_acquisition:
                 break
-            self.move_stage(2, z, True)  # here I move the stage and block the following commands
+            # Move the stage and block the following commands until the movement finish
+            self.move_stage(2, z, True) 
+
+            # Update the gui elements until we reach the last position 
             if not z == z_min:
-                self.update_ui_elements(2, z_step)
+                self.update_xyz_ui_elements(2, z_step)
 
-            # ********************************
+            # get the diopter value for the new z position
+            diopter_value = self.focus_interpolation(z)
 
-            # Space for focus interpolation code
-
-            # ********************************
-            self.focus_interpolation()
+            # Adjust the diopter, block the rest to get the right image
+            self.change_optotune_diopter(diopter_value,blocking=True)
 
             # Get a single image
             self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
@@ -436,7 +451,7 @@ class MicroscopeControlGUI(QMainWindow):
 
 
     def stop_acquisition(self):
-        self.acquisition_running = False
+        self.run_acquisition = False
         self.send_command_arduino("h?")
     
     def init_live_acquisition(self):
@@ -447,9 +462,10 @@ class MicroscopeControlGUI(QMainWindow):
         self.cam.wait_for_first_image()
         self.timer.start(100)
 
-    def focus_interpolation(self):
-        # TODO
-        return 0
+    # Got the right diopter value for the given z position according to the linear regression
+    def focus_interpolation(self,z):
+        diopter_value = self.c1_linear_regresion*z + self.c2_linear_regresion
+        return diopter_value
 
     def set_encoders_to_cero(self):
         for channel in range(3):
@@ -476,12 +492,14 @@ class MicroscopeControlGUI(QMainWindow):
             self.set_calibration_status_indicator(2)
             # disable the get calibration point button
             self.get_lens_calib_point_btn.setDisabled(True) 
-            # self.lens_calibration_line_coefficients = np.polyfit(self.lens_calib[:,0],self.lens_calib[:,1],1)
         
         # get z position
         self.lens_calib[target_row,0] = self.controller_mcm.get_position_um(2)   
         self.lens_calib[target_row,1] = self.lens.get_diopter()
 
+
+    def linear_interpolation_optotune(self):
+        self.c1_linear_regresion, self.c2_linear_regresion = np.polyfit(self.lens_calib[:,0],self.lens_calib[:,1],1)
     
     # state = 0 => not calibrated
     # state = 1 => calibration in process
