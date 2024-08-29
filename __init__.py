@@ -102,6 +102,11 @@ class MicroscopeControlGUI(QMainWindow):
         self.timer_plot_camera.timeout.connect(self.update_canvas)
 
         self.init_live_acquisition()
+
+        # The following timer help to get the stack without blocking the rest og the gui
+        self.timer_stack_acquisition = QTimer() 
+        self.timer_stack_acquisition.timeout.connect(self.single_acquisition_step)
+        self.run_stack_acquisition = False
      
         # Sliders stage
         x_layout, self.x_slider, self.x_text = self.create_slider_with_text('X Position (um)', -10000, 10000, 0, self.move_stage, channel=0)
@@ -167,7 +172,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.set_encoders_to_cero_btn = QPushButton("Set to cero encoders sample stage")
         self.set_encoders_to_cero_btn.clicked.connect(self.set_encoders_to_cero)
         self.start_acquisition_btn = QPushButton("Start Stack Acquisition")
-        self.start_acquisition_btn.clicked.connect(self.start_acquisition)
+        self.start_acquisition_btn.clicked.connect(self.start_stack_acquisition)
         self.stop_acquisition_btn = QPushButton("Stop Stack Acquisition")
         self.stop_acquisition_btn.clicked.connect(self.stop_acquisition)
 
@@ -383,7 +388,7 @@ class MicroscopeControlGUI(QMainWindow):
         elif position_type == 'min':
             self.z_min_label.setText(f'Z-Min: {current_z_position}')
 
-    def start_acquisition(self):
+    def start_stack_acquisition(self):
         try:
             z_min = int(self.z_min_label.text().split(": ")[1])
             z_max = int(self.z_max_label.text().split(": ")[1])
@@ -396,66 +401,54 @@ class MicroscopeControlGUI(QMainWindow):
             print("Optotune calibration is not completed")
             return
         
-        # get the coefficientes of the linear regression
+        # Initialize acquisition variables
+        self.z_positions = range(z_min, z_max + z_step, z_step)
+        self.current_index = 0
+        
         self.linear_interpolation_optotune()
-
-        self.run_acquisition = True
-        #self.send_command_arduino("s?")
-
-        # Stop the function that update the canvas
-        self.timer_plot_camera.stop()
-
-        # stop the previous recorder and init a new one
+        self.run_stack_acquisition = True
+        self.send_command_arduino("s?")
+        
+        # Stop the previous recorder and init a new one
         self.cam.stop()
 
-        for z in range(z_min, z_max + z_step, z_step):
-            # Stop if the "stop acquisition" btn is pressed
-            if not self.run_acquisition:
-                break
-            # Move the stage and block the following commands until the movement finish
-            self.move_stage(2, z, True) 
+        # Start the timer to begin acquisition steps
+        self.timer_stack_acquisition.start(0)  # Start immediately
 
-            # Update the gui elements until we reach the last position 
-            if not z == z_min:
-                self.update_xyz_ui_elements(2, z_step)
+    def single_acquisition_step(self):
+        if not self.run_stack_acquisition or self.current_index >= len(self.z_positions):
+            # Acquisition is done or stopped, so we can clean up
+            self.timer_stack_acquisition.stop()
+            self.send_command_arduino("p?")
+            self.init_live_acquisition()  # Restart live acquisition
+            return
 
-            # get the diopter value for the new z position
-            diopter_value = self.focus_interpolation(z)
-            
-            # Adjust the diopter, block the rest to get the right image
-            self.change_optotune_diopter(diopter_value,blocking=True)
+        z = self.z_positions[self.current_index]
 
-            # Get a single image
-            self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
-            self.cam.record()
-            
-            img, meta = self.cam.image()
+        # Move the stage and block until the movement finishes
+        self.move_stage(2, z, True)
 
-            # plot the image in the gui
-            self.canvas.img_plot.set_array(img)
-            self.canvas.draw()
+        if self.current_index > 0:
+            self.update_xyz_ui_elements(2, int(self.z_step_text.text()))
 
-            # Adjust and store the image
-            img = img.reshape((2048, 2048))
-            
-            # Apply the vmin and vmax normalization
-            img_normalized = np.clip(img, int(self.vmin_input.text()), int(self.vmax_input.text()))
+        diopter_value = self.focus_interpolation(z)
+        self.change_optotune_diopter(diopter_value, blocking=True)
 
-            # Scale the image to the range of uint16 (0 to 65535)
-            img_scaled = (img_normalized - img_normalized.min()) / (img_normalized.max() - img_normalized.min()) * 65535
+        self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
+        self.cam.record()
 
-            # Convert to uint16
-            grayscale_image_uint16 = img_scaled.astype(np.uint16)
+        img, meta = self.cam.image()
+        self.canvas.img_plot.set_array(img)
+        self.canvas.draw()
 
-            # Save the image
-            image_path = f"image_{z}.tif"
-            imwrite(image_path, grayscale_image_uint16)
+        img = img.reshape((2048, 2048))
+        img_normalized = np.clip(img, int(self.vmin_input.text()), int(self.vmax_input.text()))
+        img_scaled = (img_normalized - img_normalized.min()) / (img_normalized.max() - img_normalized.min()) * 65535
+        grayscale_image_uint16 = img_scaled.astype(np.uint16)
+        image_path = f"image_{z}.tif"
+        imwrite(image_path, grayscale_image_uint16)
 
-        # Pause stepper motor
-        self.send_command_arduino("p?")
-        # Restart live acquisition
-        self.init_live_acquisition()
-
+        self.current_index += 1  # Move to the next z position
 
     def stop_acquisition(self):
         self.run_acquisition = False
