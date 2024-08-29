@@ -98,11 +98,11 @@ class MicroscopeControlGUI(QMainWindow):
         self.create_control_buttons()
 
         # Camera plot thorugh a canvas
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_canvas)
+        self.timer_plot_camera = QTimer()
+        self.timer_plot_camera.timeout.connect(self.update_canvas)
 
         self.init_live_acquisition()
-
+     
         # Sliders stage
         x_layout, self.x_slider, self.x_text = self.create_slider_with_text('X Position (um)', -10000, 10000, 0, self.move_stage, channel=0)
         y_layout, self.y_slider, self.y_text = self.create_slider_with_text('Y Position (um)', -10000, 10000, 0, self.move_stage, channel=1)
@@ -228,7 +228,7 @@ class MicroscopeControlGUI(QMainWindow):
 
     def closeEvent(self, event):
         event.accept()
-        self.timer.stop()
+        self.timer_plot_camera.stop()
         self.cam.stop()
         self.cam.close()
         self.controller_mcm.close()
@@ -290,6 +290,7 @@ class MicroscopeControlGUI(QMainWindow):
         else:
             thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
             thread.start()
+        print("Diopter set to: ", value)
 
     def send_acc_serial_command(self, value):
         command = "a?" + str(value)
@@ -399,12 +400,12 @@ class MicroscopeControlGUI(QMainWindow):
         self.linear_interpolation_optotune()
 
         self.run_acquisition = True
-        self.send_command_arduino("s?")
+        #self.send_command_arduino("s?")
 
         # Stop the function that update the canvas
-        self.timer.stop()
+        self.timer_plot_camera.stop()
 
-        # stop the previous recorder
+        # stop the previous recorder and init a new one
         self.cam.stop()
 
         for z in range(z_min, z_max + z_step, z_step):
@@ -420,7 +421,7 @@ class MicroscopeControlGUI(QMainWindow):
 
             # get the diopter value for the new z position
             diopter_value = self.focus_interpolation(z)
-
+            
             # Adjust the diopter, block the rest to get the right image
             self.change_optotune_diopter(diopter_value,blocking=True)
 
@@ -429,6 +430,12 @@ class MicroscopeControlGUI(QMainWindow):
             self.cam.record()
             
             img, meta = self.cam.image()
+
+            # plot the image in the gui
+            self.canvas.img_plot.set_array(img)
+            self.canvas.draw()
+
+            # Adjust and store the image
             img = img.reshape((2048, 2048))
             
             # Apply the vmin and vmax normalization
@@ -460,12 +467,14 @@ class MicroscopeControlGUI(QMainWindow):
         self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
         self.cam.record(4, mode="ring buffer")
         self.cam.wait_for_first_image()
-        self.timer.start(100)
+        # 10 fps
+        self.timer_plot_camera.start(100)
+
 
     # Got the right diopter value for the given z position according to the linear regression
     def focus_interpolation(self,z):
-        diopter_value = self.c1_linear_regresion*z + self.c2_linear_regresion
-        return diopter_value
+        diopter_value_mili = (self.c1_linear_regresion*z + self.c2_linear_regresion)*1000
+        return diopter_value_mili
 
     def set_encoders_to_cero(self):
         for channel in range(3):
