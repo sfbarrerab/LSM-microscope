@@ -463,28 +463,31 @@ class MicroscopeControlGUI(QMainWindow):
 
 
     def get_lens_calib_point(self):
-        if (np.sum(self.lens_calib)==0): # check if diagonal sum is zero
+        # check if the matrix is empty
+        if (np.sum(self.lens_calib)==0): 
             target_row = 0
+            # set indicator to "calibration in process"
+            self.set_calibration_status_indicator(1)
+            # enable the clear calibration button
+            self.clear_lens_calib_btn.setDisabled(False)
         else:
             target_row = 1
-        
-        self.lens_calib[target_row,0] = self.controller_mcm.get_position_um(2)   # get z position
-        self.lens_calib[target_row,1] = self.lens.get_diopter()
-        
-        if target_row == 0:
-            self.set_calibration_status_indicator(1) # set calib indicator to yellow once one line is filled
-            self.clear_lens_calib_btn.setDisabled(False)# enable the clear calibration button
-        else:
-            self.is_lens_calibrated = True # set the calibration flag to be true once two point calibration has been performed
-            self.set_calibration_status_indicator(2) # set calib idicator to green once both lines are filled
-            self.get_lens_calib_point_btn.setDisabled(True) # disable the get calibration point button
+            # set indicator to "calibration completed"
+            self.set_calibration_status_indicator(2)
+            # disable the get calibration point button
+            self.get_lens_calib_point_btn.setDisabled(True) 
             # self.lens_calibration_line_coefficients = np.polyfit(self.lens_calib[:,0],self.lens_calib[:,1],1)
+        
+        # get z position
+        self.lens_calib[target_row,0] = self.controller_mcm.get_position_um(2)   
+        self.lens_calib[target_row,1] = self.lens.get_diopter()
 
     
     # state = 0 => not calibrated
     # state = 1 => calibration in process
     # state = 2 => calibration completed
     def set_calibration_status_indicator(self, state):
+        self.calibration_status = state
         match state:
             case 0:
                 self.calib_led_indicator.setStyleSheet("border : 2px solid black; background-color : red")
@@ -495,11 +498,12 @@ class MicroscopeControlGUI(QMainWindow):
 
 
     def clear_lens_calib(self):  
-        self.lens_calib = np.zeros((2,2)) #reset lens calib to 0,0;0,0
-        self.is_lens_calibrated = False 
-        self.set_calibration_status_indicator(0) # reset calib indicator to uncalibrated
-        self.get_lens_calib_point_btn.setDisabled(False) # re-enable the get calibration point button
-        self.clear_lens_calib_btn.setDisabled(True) # disable the clear calibration button
+        self.lens_calib = np.zeros((2,2)) 
+        # reset calib indicator to  "not calibrated"
+        self.set_calibration_status_indicator(0) 
+        # enable get calibration point button and disable clear calibration button
+        self.get_lens_calib_point_btn.setDisabled(False) 
+        self.clear_lens_calib_btn.setDisabled(True) 
     
     def create_status_bar(self):
         self.calib_led_indicator = QPushButton()
