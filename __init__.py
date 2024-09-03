@@ -47,6 +47,9 @@ class MicroscopeControlGUI(QMainWindow):
         self.c1_linear_regresion = 0
         self.c2_linear_regresion = 0
 
+        # Initial state stack acquisiton
+        self.run_stack_acquisition = False
+
         self.initUI()
 
     def initUI(self):
@@ -106,7 +109,14 @@ class MicroscopeControlGUI(QMainWindow):
         # The following timer help to get the stack without blocking the rest of the gui
         self.timer_stack_acquisition = QTimer() 
         self.timer_stack_acquisition.timeout.connect(self.single_acquisition_step)
-        self.run_stack_acquisition = False
+
+        # Timer to get the position of the stage
+        self.x_pos_stage = 0
+        self.y_pos_stage = 0
+        self.z_pos_stage = 0
+        self.timer_position_stage = QTimer()
+        self.timer_position_stage.timeout.connect(self.update_position_stage)
+        self.timer_position_stage.start(200)
      
         # Sliders stage
         x_layout, self.x_slider, self.x_text = self.create_slider_with_text('X Position (um)', -10000, 10000, 0, self.move_stage, channel=0)
@@ -114,7 +124,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -500, 500, 0, self.change_optotune_diopter)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -800, 800, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -144,7 +154,6 @@ class MicroscopeControlGUI(QMainWindow):
         # Create status bar
         self.create_status_bar() 
 
-
         light_house_layout = QGridLayout()
         light_house_layout.addWidget(self.pause_stepper_motor_btn, 0, 0)
         light_house_layout.addWidget(self.start_stepper_motor_btn, 0, 1)
@@ -165,7 +174,7 @@ class MicroscopeControlGUI(QMainWindow):
 
         self.z_step_label = QLabel('Z-Step')
         self.z_step_text = QLineEdit('10')
-        self.z_step_text.setValidator(QIntValidator(1, 500))
+        self.z_step_text.setValidator(QIntValidator(1, 1000))
         self.z_step_text.setFixedWidth(50)
         self.z_step_text.setAlignment(Qt.AlignCenter)
 
@@ -234,6 +243,7 @@ class MicroscopeControlGUI(QMainWindow):
     def closeEvent(self, event):
         event.accept()
         self.timer_plot_camera.stop()
+        self.timer_position_stage.stop()
         self.cam.stop()
         self.cam.close()
         self.controller_mcm.close()
@@ -269,7 +279,7 @@ class MicroscopeControlGUI(QMainWindow):
         slider.setTickPosition(QSlider.TicksBelow)
 
         text_box = QLineEdit(str(default_val))
-        text_box.setFixedWidth(40)
+        text_box.setFixedWidth(70)
         text_box.setAlignment(Qt.AlignCenter)
 
         hbox = QHBoxLayout()
@@ -336,6 +346,22 @@ class MicroscopeControlGUI(QMainWindow):
         self.diopter_text.setText(str(value))
         self.diopter_slider.setValue(value)
 
+    def update_position_stage(self):
+        self.x_pos_stage_new = self.controller_mcm.get_position_um(0)
+        self.y_pos_stage_new = self.controller_mcm.get_position_um(1)
+        self.z_pos_stage_new = self.controller_mcm.get_position_um(2)
+
+        if self.x_pos_stage != self.x_pos_stage_new:
+            self.x_pos_stage = self.x_pos_stage_new
+            self.update_xyz_ui_elements(0,int(self.x_pos_stage))
+        if self.y_pos_stage != self.y_pos_stage_new:
+            self.y_pos_stage = self.y_pos_stage_new
+            self.update_xyz_ui_elements(1,int(self.y_pos_stage))
+        if self.z_pos_stage != self.z_pos_stage_new:
+            self.z_pos_stage = self.z_pos_stage_new
+            self.update_xyz_ui_elements(2,int(self.z_pos_stage))
+
+
     def create_control_buttons(self):
         self.joystick_layout = QGridLayout()
 
@@ -365,7 +391,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.joystick_layout.addWidget(z_up_button, 0, 3)
         self.joystick_layout.addWidget(z_down_button, 2, 3)
 
-    def move_stage(self, channel, value, blocking = False):
+    def move_stage(self, channel, value, blocking = True):
         if not(blocking):
             thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, value, False))
             thread.start()
@@ -540,20 +566,6 @@ class MicroscopeControlGUI(QMainWindow):
         
         self.status_bar.addPermanentWidget(QLabel("Lens calibration status: "))
         self.status_bar.addPermanentWidget(self.calib_led_indicator)
-
-        self.status_bar.addPermanentWidget(QLabel("Current stage position: "))
-        
-        
-        self.status_bar.addPermanentWidget(QLabel("X="))
-        self.position_indicator_X = QLabel("0 ")
-        self.status_bar.addPermanentWidget(self.position_indicator_X) 
-        self.status_bar.addPermanentWidget(QLabel("Y="))
-        self.position_indicator_Y = QLabel("0 ")
-        self.status_bar.addPermanentWidget(self.position_indicator_Y) 
-        self.status_bar.addPermanentWidget(QLabel("Z="))
-        self.position_indicator_Z = QLabel("0 ")
-        self.status_bar.addPermanentWidget(self.position_indicator_Z) 
-        self.status_bar.addPermanentWidget(QLabel(""),1) #this is a buffer to align content to the left
         self.setStatusBar(self.status_bar)
 
         
