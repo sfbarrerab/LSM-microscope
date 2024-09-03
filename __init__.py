@@ -114,7 +114,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -500, 500, 0, self.change_optotune_diopter)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -800, 800, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -269,7 +269,7 @@ class MicroscopeControlGUI(QMainWindow):
         slider.setTickPosition(QSlider.TicksBelow)
 
         text_box = QLineEdit(str(default_val))
-        text_box.setFixedWidth(40)
+        text_box.setFixedWidth(70)
         text_box.setAlignment(Qt.AlignCenter)
 
         hbox = QHBoxLayout()
@@ -540,20 +540,6 @@ class MicroscopeControlGUI(QMainWindow):
         
         self.status_bar.addPermanentWidget(QLabel("Lens calibration status: "))
         self.status_bar.addPermanentWidget(self.calib_led_indicator)
-
-        self.status_bar.addPermanentWidget(QLabel("Current stage position: "))
-        
-        
-        self.status_bar.addPermanentWidget(QLabel("X="))
-        self.position_indicator_X = QLabel("0 ")
-        self.status_bar.addPermanentWidget(self.position_indicator_X) 
-        self.status_bar.addPermanentWidget(QLabel("Y="))
-        self.position_indicator_Y = QLabel("0 ")
-        self.status_bar.addPermanentWidget(self.position_indicator_Y) 
-        self.status_bar.addPermanentWidget(QLabel("Z="))
-        self.position_indicator_Z = QLabel("0 ")
-        self.status_bar.addPermanentWidget(self.position_indicator_Z) 
-        self.status_bar.addPermanentWidget(QLabel(""),1) #this is a buffer to align content to the left
         self.setStatusBar(self.status_bar)
 
         
