@@ -114,9 +114,11 @@ class MicroscopeControlGUI(QMainWindow):
         self.x_pos_stage = 0
         self.y_pos_stage = 0
         self.z_pos_stage = 0
-        self.timer_position_stage = QTimer()
-        self.timer_position_stage.timeout.connect(self.update_position_stage)
-        self.timer_position_stage.start(200)
+        # Variable to track when the optotune should be adjsuted
+        self.z_changed = False
+        self.live_focus_interpolation_timer = QTimer()
+        self.live_focus_interpolation_timer.timeout.connect(self.live_focus_interpolation)
+        self.live_focus_interpolation_timer.start(200)
      
         # Sliders stage
         x_layout, self.x_slider, self.x_text = self.create_slider_with_text('X Position (um)', -10000, 10000, 0, self.move_stage, channel=0)
@@ -124,7 +126,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -800, 800, 0, self.change_optotune_diopter)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -1200, 1200, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -243,7 +245,7 @@ class MicroscopeControlGUI(QMainWindow):
     def closeEvent(self, event):
         event.accept()
         self.timer_plot_camera.stop()
-        self.timer_position_stage.stop()
+        self.live_focus_interpolation_timer.stop()
         self.cam.stop()
         self.cam.close()
         self.controller_mcm.close()
@@ -305,7 +307,6 @@ class MicroscopeControlGUI(QMainWindow):
         else:
             thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
             thread.start()
-        print("Diopter set to: ", value)
 
     def send_acc_serial_command(self, value):
         command = "a?" + str(value)
@@ -346,6 +347,10 @@ class MicroscopeControlGUI(QMainWindow):
         self.diopter_text.setText(str(value))
         self.diopter_slider.setValue(value)
 
+    def live_focus_interpolation(self):
+        self.update_position_stage()
+        self.update_diopter_live()
+
     def update_position_stage(self):
         self.x_pos_stage_new = self.controller_mcm.get_position_um(0)
         self.y_pos_stage_new = self.controller_mcm.get_position_um(1)
@@ -358,9 +363,19 @@ class MicroscopeControlGUI(QMainWindow):
             self.y_pos_stage = self.y_pos_stage_new
             self.update_xyz_ui_elements(1,int(self.y_pos_stage))
         if self.z_pos_stage != self.z_pos_stage_new:
+            self.z_changed = True
             self.z_pos_stage = self.z_pos_stage_new
             self.update_xyz_ui_elements(2,int(self.z_pos_stage))
 
+
+    def update_diopter_live(self):
+        if self.z_changed and self.calibration_status == 2:
+            self.linear_interpolation_optotune()
+            diopter_value = self.focus_interpolation(self.z_pos_stage)
+            self.change_optotune_diopter(diopter_value, blocking=True)
+            self.update_diopter_ui_element(int(diopter_value))
+            self.z_changed = False
+            
 
     def create_control_buttons(self):
         self.joystick_layout = QGridLayout()
@@ -438,7 +453,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.z_positions = range(z_min, z_max + z_step, z_step)
         self.current_index = 0
         
-        self.linear_interpolation_optotune()
+        
         self.run_stack_acquisition = True
         self.send_command_arduino("s?")
         
@@ -512,6 +527,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.y_slider.setValue(0)
         self.z_text.setText(str(0))
         self.z_slider.setValue(0)
+        self.clear_lens_calib()
 
 
     def get_lens_calib_point(self):
