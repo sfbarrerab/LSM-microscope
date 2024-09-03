@@ -103,7 +103,7 @@ class MicroscopeControlGUI(QMainWindow):
 
         self.init_live_acquisition()
 
-        # The following timer help to get the stack without blocking the rest og the gui
+        # The following timer help to get the stack without blocking the rest of the gui
         self.timer_stack_acquisition = QTimer() 
         self.timer_stack_acquisition.timeout.connect(self.single_acquisition_step)
         self.run_stack_acquisition = False
@@ -323,17 +323,18 @@ class MicroscopeControlGUI(QMainWindow):
 
     def update_xyz_ui_elements(self, channel, value):
         if channel == 0:
-            new_value = value + int(self.x_text.text())
-            self.x_text.setText(str(new_value))
-            self.x_slider.setValue(new_value)
+            self.x_text.setText(str(value))
+            self.x_slider.setValue(value)
         elif channel == 1:
-            new_value = value + int(self.y_text.text())
-            self.y_text.setText(str(new_value))
-            self.y_slider.setValue(new_value)
+            self.y_text.setText(str(value))
+            self.y_slider.setValue(value)
         elif channel == 2:
-            new_value = value + int(self.z_text.text())
-            self.z_text.setText(str(new_value))
-            self.z_slider.setValue(new_value)
+            self.z_text.setText(str(value))
+            self.z_slider.setValue(value)
+
+    def update_diopter_ui_element(self,value):
+        self.diopter_text.setText(str(value))
+        self.diopter_slider.setValue(value)
 
     def create_control_buttons(self):
         self.joystick_layout = QGridLayout()
@@ -375,7 +376,13 @@ class MicroscopeControlGUI(QMainWindow):
         move_value = default_um_btn_move * direction
         thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, default_um_btn_move * direction, True))
         thread.start()
-        self.update_xyz_ui_elements(channel, move_value)
+        if channel == 0:
+            new_value = move_value + int(self.x_text.text())
+        elif channel == 1:
+            new_value = move_value + int(self.y_text.text())
+        elif channel == 2:
+            new_value = move_value + int(self.z_text.text())
+        self.update_xyz_ui_elements(channel, new_value)
 
     def send_command_arduino(self, command):
         self.arduino.write(bytes(command, 'utf-8'))
@@ -427,13 +434,13 @@ class MicroscopeControlGUI(QMainWindow):
 
         # Move the stage and block until the movement finishes
         self.move_stage(2, z, True)
-
-        if self.current_index > 0:
-            self.update_xyz_ui_elements(2, int(self.z_step_text.text()))
+        self.update_xyz_ui_elements(2, int(z))
 
         diopter_value = self.focus_interpolation(z)
         self.change_optotune_diopter(diopter_value, blocking=True)
+        self.update_diopter_ui_element(int(diopter_value))
 
+        # Take and image, plot it and save it
         self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
         self.cam.record()
 
@@ -451,7 +458,8 @@ class MicroscopeControlGUI(QMainWindow):
         self.current_index += 1  # Move to the next z position
 
     def stop_acquisition(self):
-        self.run_acquisition = False
+        self.run_stack_acquisition = False
+        print("Stack acquisition stopped")
         self.send_command_arduino("h?")
     
     def init_live_acquisition(self):
@@ -499,7 +507,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.lens_calib[target_row,0] = self.controller_mcm.get_position_um(2)   
         self.lens_calib[target_row,1] = self.lens.get_diopter()
 
-
+    # Find the coefficients for the focus linear interpolation
     def linear_interpolation_optotune(self):
         self.c1_linear_regresion, self.c2_linear_regresion = np.polyfit(self.lens_calib[:,0],self.lens_calib[:,1],1)
     
