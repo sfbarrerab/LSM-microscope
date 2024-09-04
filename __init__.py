@@ -38,6 +38,7 @@ class MicroscopeControlGUI(QMainWindow):
             self.controller_mcm._set_encoder_counts_to_zero(channel)
 
         self.lens = Lens('COM5', debug=False)
+        self.lens.to_focal_power_mode()
         self.cam = pco.Camera(interface="USB 3.0")
         self.arduino = serial.Serial(port="COM6", baudrate=115200, timeout=1)
 
@@ -126,7 +127,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -1200, 1200, 0, self.change_optotune_diopter)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -12000, 12000, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -413,10 +414,14 @@ class MicroscopeControlGUI(QMainWindow):
         else:
             self.controller_mcm.move_um(channel,value,False)
 
-    def move_stage_with_btns(self, channel, direction):
+    def move_stage_with_btns(self, channel, direction, blocking = True):
         move_value = default_um_btn_move * direction
-        thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, default_um_btn_move * direction, True))
-        thread.start()
+        if not(blocking):
+            thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, default_um_btn_move * direction, True))
+            thread.start()
+        else:
+            self.controller_mcm.move_um(channel,default_um_btn_move * direction,True)
+
         if channel == 0:
             new_value = move_value + int(self.x_text.text())
         elif channel == 1:
