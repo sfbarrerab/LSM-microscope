@@ -38,6 +38,8 @@ class MicroscopeControlGUI(QMainWindow):
             self.controller_mcm._set_encoder_counts_to_zero(channel)
 
         self.lens = Lens('COM5', debug=False)
+        self.lens.to_focal_power_mode()
+
         self.cam = pco.Camera(interface="USB 3.0")
         self.arduino = serial.Serial(port="COM6", baudrate=115200, timeout=1)
 
