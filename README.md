@@ -33,6 +33,6 @@ The software of the LSM controll the following modules:
 
 ![Pinout step motor driver](images_readme/silent_step_pinout.PNG)
 
-<!-- ## Napari
+## Known bugs
 
-[Napari](https://napari.org) is a powerful library for n-dimensional image visualisation, annotation, and analysis. Hence, it is the selected tool for this project. To run it, just write the command `napari` in the console after activating the environment. -->
+The GUI is going to froze when you try to move the motor in a position out of the range of the motor.

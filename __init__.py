@@ -127,7 +127,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -12000, 12000, 0, self.change_optotune_diopter)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -4000, 4000, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -258,20 +258,10 @@ class MicroscopeControlGUI(QMainWindow):
 
         img, meta = self.cam.image()
         img = img.reshape((2048, 2048))
-        
-
-        # Apply the vmin and vmax normalization
-        img_normalized = np.clip(img, int(self.vmin_input.text()), int(self.vmax_input.text()))
-
-        # Scale the image to the range of uint16 (0 to 65535)
-        img_scaled = (img_normalized - img_normalized.min()) / (img_normalized.max() - img_normalized.min()) * 65535
-
-        # Convert to uint16
-        grayscale_image_uint16 = img_scaled.astype(np.uint16)
 
         # Save the image
         image_path = f"image.tif"
-        imwrite(image_path, grayscale_image_uint16)
+        imwrite(image_path, img)
 
 
     def create_slider_with_text(self, label, min_val, max_val, default_val, callback, channel=None):
@@ -495,11 +485,8 @@ class MicroscopeControlGUI(QMainWindow):
         self.canvas.draw()
 
         img = img.reshape((2048, 2048))
-        img_normalized = np.clip(img, int(self.vmin_input.text()), int(self.vmax_input.text()))
-        img_scaled = (img_normalized - img_normalized.min()) / (img_normalized.max() - img_normalized.min()) * 65535
-        grayscale_image_uint16 = img_scaled.astype(np.uint16)
         image_path = f"image_{z}.tif"
-        imwrite(image_path, grayscale_image_uint16)
+        imwrite(image_path, img)
 
         self.current_index += 1  # Move to the next z position
 
