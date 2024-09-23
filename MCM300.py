@@ -177,11 +177,12 @@ class Controller:
         return legal_move_um
 
     def get_position_um(self, channel):
-        if self.verbose:
-            print('%s(ch%s): getting position'%(self.name, channel))
+        # if self.verbose:
+        #     print('%s(ch%s): getting position'%(self.name, channel))
         self._get_encoder_counts(channel)
-        if self.verbose:
-            print('%s(ch%s): -> position_um = %0.2f'%(self.name, channel, self.position_um[channel]))
+        # if self.verbose:
+        #     print('%s(ch%s): -> position_um = %0.2f'%(
+        #         self.name, channel, self.position_um[channel]))
         return self.position_um[channel]
 
     def move_um(self, channel, move_um, relative, block=True):

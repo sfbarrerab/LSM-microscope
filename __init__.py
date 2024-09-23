@@ -39,7 +39,6 @@ class MicroscopeControlGUI(QMainWindow):
 
         self.lens = Lens('COM5', debug=False)
         self.lens.to_focal_power_mode()
-
         self.cam = pco.Camera(interface="USB 3.0")
         self.arduino = serial.Serial(port="COM6", baudrate=115200, timeout=1)
 
@@ -48,6 +47,9 @@ class MicroscopeControlGUI(QMainWindow):
         self.calibration_status = 0
         self.c1_linear_regresion = 0
         self.c2_linear_regresion = 0
+
+        # Initial state stack acquisiton
+        self.run_stack_acquisition = False
 
         self.initUI()
 
@@ -108,7 +110,16 @@ class MicroscopeControlGUI(QMainWindow):
         # The following timer help to get the stack without blocking the rest of the gui
         self.timer_stack_acquisition = QTimer() 
         self.timer_stack_acquisition.timeout.connect(self.single_acquisition_step)
-        self.run_stack_acquisition = False
+
+        # Timer to get the position of the stage
+        self.x_pos_stage = 0
+        self.y_pos_stage = 0
+        self.z_pos_stage = 0
+        # Variable to track when the optotune should be adjsuted
+        self.z_changed = False
+        self.live_focus_interpolation_timer = QTimer()
+        self.live_focus_interpolation_timer.timeout.connect(self.live_focus_interpolation)
+        self.live_focus_interpolation_timer.start(200)
      
         # Sliders stage
         x_layout, self.x_slider, self.x_text = self.create_slider_with_text('X Position (um)', -10000, 10000, 0, self.move_stage, channel=0)
@@ -116,7 +127,7 @@ class MicroscopeControlGUI(QMainWindow):
         z_layout, self.z_slider, self.z_text = self.create_slider_with_text('Z Position (um)', -10000, 10000, 0, self.move_stage, channel=2)
 
         # Sliders optotune lens and arduino stepper motor
-        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -800, 800, 0, self.change_optotune_diopter)
+        mili_diopter_layout, self.diopter_slider, self.diopter_text = self.create_slider_with_text('mili Diopter', -12000, 12000, 0, self.change_optotune_diopter)
         acceleration_layout, self.acceleration_slider, self.acceleration_text = self.create_slider_with_text('Acceleration', 1, 25000, 1000, self.send_acc_serial_command)
         amplitude_layout, self.amplitude_slider, self.amplitude_text = self.create_slider_with_text('Amplitude', 1, 50, 30, self.send_width_serial_command)
 
@@ -146,7 +157,6 @@ class MicroscopeControlGUI(QMainWindow):
         # Create status bar
         self.create_status_bar() 
 
-
         light_house_layout = QGridLayout()
         light_house_layout.addWidget(self.pause_stepper_motor_btn, 0, 0)
         light_house_layout.addWidget(self.start_stepper_motor_btn, 0, 1)
@@ -167,7 +177,7 @@ class MicroscopeControlGUI(QMainWindow):
 
         self.z_step_label = QLabel('Z-Step')
         self.z_step_text = QLineEdit('10')
-        self.z_step_text.setValidator(QIntValidator(1, 500))
+        self.z_step_text.setValidator(QIntValidator(1, 1000))
         self.z_step_text.setFixedWidth(50)
         self.z_step_text.setAlignment(Qt.AlignCenter)
 
@@ -236,6 +246,7 @@ class MicroscopeControlGUI(QMainWindow):
     def closeEvent(self, event):
         event.accept()
         self.timer_plot_camera.stop()
+        self.live_focus_interpolation_timer.stop()
         self.cam.stop()
         self.cam.close()
         self.controller_mcm.close()
@@ -297,7 +308,6 @@ class MicroscopeControlGUI(QMainWindow):
         else:
             thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
             thread.start()
-        print("Diopter set to: ", value)
 
     def send_acc_serial_command(self, value):
         command = "a?" + str(value)
@@ -338,6 +348,36 @@ class MicroscopeControlGUI(QMainWindow):
         self.diopter_text.setText(str(value))
         self.diopter_slider.setValue(value)
 
+    def live_focus_interpolation(self):
+        self.update_position_stage()
+        self.update_diopter_live()
+
+    def update_position_stage(self):
+        self.x_pos_stage_new = self.controller_mcm.get_position_um(0)
+        self.y_pos_stage_new = self.controller_mcm.get_position_um(1)
+        self.z_pos_stage_new = self.controller_mcm.get_position_um(2)
+
+        if self.x_pos_stage != self.x_pos_stage_new:
+            self.x_pos_stage = self.x_pos_stage_new
+            self.update_xyz_ui_elements(0,int(self.x_pos_stage))
+        if self.y_pos_stage != self.y_pos_stage_new:
+            self.y_pos_stage = self.y_pos_stage_new
+            self.update_xyz_ui_elements(1,int(self.y_pos_stage))
+        if self.z_pos_stage != self.z_pos_stage_new:
+            self.z_changed = True
+            self.z_pos_stage = self.z_pos_stage_new
+            self.update_xyz_ui_elements(2,int(self.z_pos_stage))
+
+
+    def update_diopter_live(self):
+        if self.z_changed and self.calibration_status == 2:
+            self.linear_interpolation_optotune()
+            diopter_value = self.focus_interpolation(self.z_pos_stage)
+            self.change_optotune_diopter(diopter_value, blocking=True)
+            self.update_diopter_ui_element(int(diopter_value))
+            self.z_changed = False
+            
+
     def create_control_buttons(self):
         self.joystick_layout = QGridLayout()
 
@@ -367,17 +407,21 @@ class MicroscopeControlGUI(QMainWindow):
         self.joystick_layout.addWidget(z_up_button, 0, 3)
         self.joystick_layout.addWidget(z_down_button, 2, 3)
 
-    def move_stage(self, channel, value, blocking = False):
+    def move_stage(self, channel, value, blocking = True):
         if not(blocking):
             thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, value, False))
             thread.start()
         else:
             self.controller_mcm.move_um(channel,value,False)
 
-    def move_stage_with_btns(self, channel, direction):
+    def move_stage_with_btns(self, channel, direction, blocking = True):
         move_value = default_um_btn_move * direction
-        thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, default_um_btn_move * direction, True))
-        thread.start()
+        if not(blocking):
+            thread = threading.Thread(target=self.controller_mcm.move_um, args=(channel, default_um_btn_move * direction, True))
+            thread.start()
+        else:
+            self.controller_mcm.move_um(channel,default_um_btn_move * direction,True)
+
         if channel == 0:
             new_value = move_value + int(self.x_text.text())
         elif channel == 1:
@@ -414,7 +458,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.z_positions = range(z_min, z_max + z_step, z_step)
         self.current_index = 0
         
-        self.linear_interpolation_optotune()
+        
         self.run_stack_acquisition = True
         self.send_command_arduino("s?")
         
@@ -488,6 +532,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.y_slider.setValue(0)
         self.z_text.setText(str(0))
         self.z_slider.setValue(0)
+        self.clear_lens_calib()
 
 
     def get_lens_calib_point(self):
