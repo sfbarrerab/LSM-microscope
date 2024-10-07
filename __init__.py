@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSlider, QPushButton, QLineEdit, QGridLayout, QMainWindow, QStatusBar
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QGroupBox, QVBoxLayout, QHBoxLayout, QSlider, QPushButton, QLineEdit, QGridLayout, QMainWindow, QStatusBar
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtCore import Qt, QTimer, QMetaObject
 import threading
@@ -59,15 +59,6 @@ class MicroscopeControlGUI(QMainWindow):
         # Create the canvas for the camera
         self.canvas = MplCanvas()
 
-        # Create the main layout
-        main_layout = QHBoxLayout()
-        
-        # Create the settings layout
-        settings_layout = QVBoxLayout()
-        settings_widget = QWidget()
-        settings_widget.setLayout(settings_layout)
-        settings_widget.setFixedWidth(500)  # Fixed width for settings
-
         # Add exposure time input
         exposure_layout = QHBoxLayout()
         exposure_label = QLabel("Exposure Time (ms):")
@@ -92,10 +83,6 @@ class MicroscopeControlGUI(QMainWindow):
         vmax_layout.addWidget(vmax_label)
         vmax_layout.addWidget(self.vmax_input)
 
-        # Add the exposure and min/max controls to the settings layout
-        settings_layout.addLayout(exposure_layout)
-        settings_layout.addLayout(vmin_layout)
-        settings_layout.addLayout(vmax_layout)
 
         # Label um step fixed size
         self.label_joystick = QLabel('10 um steps for sample stage')
@@ -154,24 +141,15 @@ class MicroscopeControlGUI(QMainWindow):
         self.clear_lens_calib_btn.clicked.connect(self.clear_lens_calib)
         self.clear_lens_calib_btn.setDisabled(True)
 
-        # Create status bar
-        self.create_status_bar() 
-
-        light_house_layout = QGridLayout()
-        light_house_layout.addWidget(self.pause_stepper_motor_btn, 0, 0)
-        light_house_layout.addWidget(self.start_stepper_motor_btn, 0, 1)
-        light_house_layout.addWidget(self.move_ccw_stepper_motor_btn,1,0)
-        light_house_layout.addWidget(self.move_cw_stepper_motor_btn,1,1)
-        light_house_layout.addWidget(self.stop_stepper_motor_btn)
-        light_house_layout.addWidget(self.get_lens_calib_point_btn,3,0)
-        light_house_layout.addWidget(self.clear_lens_calib_btn,3,1)
 
         # Acquisition z start/end positions
         self.z_max_label = QLabel('Z-Max')
+        self.z_max_label.setFixedWidth(150)
         self.z_max_btn = QPushButton('Set Z-Max')
         self.z_max_btn.clicked.connect(lambda: self.set_z_position('max'))
 
         self.z_min_label = QLabel('Z-Min')
+        self.z_min_label.setFixedWidth(150)
         self.z_min_btn = QPushButton('Set Z-Min')
         self.z_min_btn.clicked.connect(lambda: self.set_z_position('min'))
 
@@ -191,29 +169,87 @@ class MicroscopeControlGUI(QMainWindow):
         self.save_image_btn = QPushButton("Save image")
         self.save_image_btn.clicked.connect(self.save_image)
 
-        settings_layout.addWidget(self.label_joystick)
-        settings_layout.addLayout(self.joystick_layout)
-        settings_layout.addLayout(x_layout)
-        settings_layout.addLayout(y_layout)
-        settings_layout.addLayout(z_layout)
-        settings_layout.addLayout(mili_diopter_layout)
-        settings_layout.addLayout(acceleration_layout)
-        settings_layout.addLayout(amplitude_layout)
-        settings_layout.addLayout(light_house_layout)
+        # Create status bar
+        self.create_status_bar()
 
-        z_pos_layout = QHBoxLayout()
-        z_pos_layout.addWidget(self.z_max_label)
-        z_pos_layout.addWidget(self.z_max_btn)
-        z_pos_layout.addWidget(self.z_min_label)
-        z_pos_layout.addWidget(self.z_min_btn)
-        z_pos_layout.addWidget(self.z_step_label)
-        z_pos_layout.addWidget(self.z_step_text)
+        # Create the different sections for the gui 
+        # Create the main layout
+        main_layout = QHBoxLayout()
+        
+        # Create the settings layout
+        settings_layout = QVBoxLayout()
+        settings_widget = QWidget()
+        settings_widget.setLayout(settings_layout)
+        settings_widget.setFixedWidth(500)  # Fixed width for settings
 
-        settings_layout.addLayout(z_pos_layout)
-        settings_layout.addWidget(self.set_encoders_to_cero_btn)
-        settings_layout.addWidget(self.start_acquisition_btn)
-        settings_layout.addWidget(self.stop_acquisition_btn)
-        settings_layout.addWidget(self.save_image_btn)
+        
+        camera_box = QGroupBox("Camera")
+        stage_box = QGroupBox("Stage")
+        stepper_box = QGroupBox("Stepper motor")
+        focus_interpolation_box = QGroupBox("Focus interpolation")
+        stack_acquisition_box = QGroupBox("Stack acquisition")
+
+        # Camera layout
+        camera_layout = QVBoxLayout()
+        camera_layout.addLayout(exposure_layout)
+        camera_layout.addLayout(vmin_layout)
+        camera_layout.addLayout(vmax_layout)
+        camera_box.setLayout(camera_layout)
+
+        # Stage layout
+        stage_layout = QVBoxLayout()
+        stage_layout.addWidget(self.label_joystick)
+        stage_layout.addLayout(self.joystick_layout)
+        stage_layout.addLayout(x_layout)
+        stage_layout.addLayout(y_layout)
+        stage_layout.addLayout(z_layout)
+        stage_layout.addWidget(self.set_encoders_to_cero_btn)
+        stage_box.setLayout(stage_layout)
+
+        # Stepper motor layout
+        stepper_motor_layout = QVBoxLayout()
+        stepper_motor_layout.addLayout(acceleration_layout)
+        stepper_motor_layout.addLayout(amplitude_layout)
+        stepper_motor_btns_layout = QGridLayout()
+        stepper_motor_btns_layout.addWidget(self.start_stepper_motor_btn, 0, 0)
+        stepper_motor_btns_layout.addWidget(self.pause_stepper_motor_btn, 0, 1)
+        stepper_motor_btns_layout.addWidget(self.move_ccw_stepper_motor_btn,1,0)
+        stepper_motor_btns_layout.addWidget(self.move_cw_stepper_motor_btn,1,1)
+        stepper_motor_btns_layout.addWidget(self.stop_stepper_motor_btn,2,0)
+        stepper_motor_layout.addLayout(stepper_motor_btns_layout)
+        stepper_box.setLayout(stepper_motor_layout)        
+
+        # Focus interpolation layout
+        focus_interpolation_layout = QVBoxLayout()
+        focus_interpolation_layout.addLayout(mili_diopter_layout)
+        focus_interpolation_btns_layout = QGridLayout()
+        focus_interpolation_btns_layout.addWidget(self.get_lens_calib_point_btn,0,0)
+        focus_interpolation_btns_layout.addWidget(self.clear_lens_calib_btn,0,1)
+        focus_interpolation_layout.addLayout(focus_interpolation_btns_layout)
+        focus_interpolation_box.setLayout(focus_interpolation_layout)
+
+        # Stack acquisition layout
+        stack_acquisition_z_parameters_layout = QHBoxLayout()
+        stack_acquisition_z_parameters_layout.addWidget(self.z_max_label)
+        stack_acquisition_z_parameters_layout.addWidget(self.z_max_btn)
+        stack_acquisition_z_parameters_layout.addWidget(self.z_min_label)
+        stack_acquisition_z_parameters_layout.addWidget(self.z_min_btn)
+        stack_acquisition_z_parameters_layout.addWidget(self.z_step_label)
+        stack_acquisition_z_parameters_layout.addWidget(self.z_step_text)
+
+        stack_acquisition_layout = QVBoxLayout()
+        stack_acquisition_layout.addLayout(stack_acquisition_z_parameters_layout)
+        stack_acquisition_layout.addWidget(self.start_acquisition_btn)
+        stack_acquisition_layout.addWidget(self.stop_acquisition_btn)
+        stack_acquisition_layout.addWidget(self.save_image_btn)
+        stack_acquisition_box.setLayout(stack_acquisition_layout)
+
+        # Add the different boxes to the settings layout
+        settings_layout.addWidget(camera_box)
+        settings_layout.addWidget(stage_box)
+        settings_layout.addWidget(stepper_box)
+        settings_layout.addWidget(focus_interpolation_box)
+        settings_layout.addWidget(stack_acquisition_box)
 
         main_layout.addWidget(settings_widget)
         main_layout.addWidget(self.canvas, stretch=3)  # Make the canvas stretch
