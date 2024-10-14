@@ -19,7 +19,7 @@ void init_motor() {
     driver_stepper.microsteps(32);      // every microstep is 0,056°, if r=10cm -> every microstep is around 0,1 mm
     driver_stepper.high_speed_mode(1);
 
-    stepper.setMaxSpeed(SCAN_SPEED);
+    stepper.setMaxSpeed(MAX_SCAN_SPEED);
     stepper.setAcceleration(headAcceleration); 
     stepper.setEnablePin(EN_PIN);
     stepper.setPinsInverted(false, false, true);
