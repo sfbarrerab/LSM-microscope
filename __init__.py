@@ -15,11 +15,13 @@ from matplotlib.colors import Normalize
 import matplotlib.pyplot as plt
 
 default_um_btn_move = 10
+vmin_default = 0
+vmax_default = 255
 
 class MplCanvas(FigureCanvas):
     def __init__(self):
         self.fig, self.ax = plt.subplots()
-        self.img_plot = self.ax.imshow(np.zeros((2048, 2048)), cmap='gray', norm=Normalize(vmin=0, vmax=255))
+        self.img_plot = self.ax.imshow(np.zeros((2048, 2048)), cmap='gray', norm=Normalize(vmin=vmin_default, vmax=vmax_default))
         self.ax.set_ylim(0, 2048)
         self.ax.set_xlim(0, 2048)
         super().__init__(self.fig)
@@ -31,7 +33,7 @@ class MicroscopeControlGUI(QMainWindow):
         # Initialize components
         self.controller_mcm = mc.Controller(which_port='COM4',
                                         stages=('ZFM2020', 'ZFM2020', 'ZFM2020'),
-                                        reverse=(False, False, False),
+                                        reverse=(True, False, False),
                                         verbose=True,
                                         very_verbose=False)
         for channel in range(3):
@@ -39,6 +41,8 @@ class MicroscopeControlGUI(QMainWindow):
 
         self.lens = Lens('COM5', debug=False)
         self.lens.to_focal_power_mode()
+        self.lens.set_diopter(0)
+
         self.cam = pco.Camera(interface="USB 3.0")
         self.arduino = serial.Serial(port="COM6", baudrate=115200, timeout=1)
 
@@ -70,7 +74,7 @@ class MicroscopeControlGUI(QMainWindow):
         # Add vmin input
         vmin_layout = QHBoxLayout()
         vmin_label = QLabel("vmin:")
-        self.vmin_input = QLineEdit("0")
+        self.vmin_input = QLineEdit(str(vmin_default))
         self.vmin_input.returnPressed.connect(self.update_vmin_vmax)
         vmin_layout.addWidget(vmin_label)
         vmin_layout.addWidget(self.vmin_input)
@@ -78,7 +82,7 @@ class MicroscopeControlGUI(QMainWindow):
         # Add vmax input
         vmax_layout = QHBoxLayout()
         vmax_label = QLabel("vmax:")
-        self.vmax_input = QLineEdit("255")
+        self.vmax_input = QLineEdit(str(vmax_default))
         self.vmax_input.returnPressed.connect(self.update_vmin_vmax)
         vmax_layout.addWidget(vmax_label)
         vmax_layout.addWidget(self.vmax_input)
@@ -276,8 +280,26 @@ class MicroscopeControlGUI(QMainWindow):
 
     def update_canvas(self):
         img, meta = self.cam.image()
-        self.canvas.img_plot.set_array(img)
+        self.canvas.img_plot.set_array(np.flip(img,axis=0))
         self.canvas.draw()
+
+    def init_live_acquisition(self):
+        self.cam.sdk.set_recording_state('off')
+        self.cam.sdk.set_trigger_mode('auto sequence')
+        self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
+        self.cam.record(4, mode="ring buffer")
+        self.cam.wait_for_first_image()
+        # 10 fps
+        self.timer_plot_camera.start(100)
+
+    def save_image(self):
+
+        self.cam.wait_for_first_image()
+        img, meta = self.cam.image()
+        # Save the image
+        image_path = f"image.tif"
+        imwrite(image_path, img)
+
 
     def closeEvent(self, event):
         event.accept()
@@ -287,17 +309,6 @@ class MicroscopeControlGUI(QMainWindow):
         self.cam.close()
         self.controller_mcm.close()
         self.arduino.close()
-
-    def save_image(self):
-
-        self.cam.wait_for_first_image()
-
-        img, meta = self.cam.image()
-        img = img.reshape((2048, 2048))
-
-        # Save the image
-        image_path = f"image.tif"
-        imwrite(image_path, img)
 
 
     def create_slider_with_text(self, label, min_val, max_val, default_val, callback, channel=None):
@@ -334,16 +345,6 @@ class MicroscopeControlGUI(QMainWindow):
         else:
             thread = threading.Thread(target=self.lens.set_diopter, args=([(float)(value/1000.0)]))
             thread.start()
-
-    def send_acc_serial_command(self, value):
-        command = "a?" + str(value)
-        self.arduino.write(bytes(command, 'utf-8'))
-        time.sleep(0.5)
-
-    def send_width_serial_command(self, value):
-        command = "w?" + str(value)
-        self.arduino.write(bytes(command, 'utf-8'))
-        time.sleep(0.5)
 
     def update_text_box_from_slider(self, value, text_box):
         text_box.setText(str(value))
@@ -460,6 +461,16 @@ class MicroscopeControlGUI(QMainWindow):
         self.arduino.write(bytes(command, 'utf-8'))
         time.sleep(0.5)
 
+    def send_acc_serial_command(self, value):
+        command = "a?" + str(value)
+        self.arduino.write(bytes(command, 'utf-8'))
+        time.sleep(0.5)
+
+    def send_width_serial_command(self, value):
+        command = "w?" + str(value)
+        self.arduino.write(bytes(command, 'utf-8'))
+        time.sleep(0.5)
+
     def set_z_position(self, position_type):
         current_z_position = self.z_slider.value()
         if position_type == 'max':
@@ -531,16 +542,6 @@ class MicroscopeControlGUI(QMainWindow):
         print("Stack acquisition stopped")
         self.send_command_arduino("h?")
     
-    def init_live_acquisition(self):
-        self.cam.sdk.set_recording_state('off')
-        self.cam.sdk.set_trigger_mode('auto sequence')
-        self.cam.sdk.set_delay_exposure_time(0, 'ms', int(self.exposure_input.text()), 'ms')
-        self.cam.record(4, mode="ring buffer")
-        self.cam.wait_for_first_image()
-        # 10 fps
-        self.timer_plot_camera.start(100)
-
-
     # Got the right diopter value for the given z position according to the linear regression
     def focus_interpolation(self,z):
         diopter_value_mili = (self.c1_linear_regresion*z + self.c2_linear_regresion)*1000

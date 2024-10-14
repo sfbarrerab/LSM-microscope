@@ -13,7 +13,7 @@
 #define DIR_PIN   8  
 #define STEP_PIN  9  
 #define CS_PIN    10 
-#define SCAN_SPEED 8000
+#define SCAN_SPEED 1000
 
 extern int sheet_width;
 extern long headAcceleration;
