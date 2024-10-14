@@ -58,7 +58,7 @@ class MicroscopeControlGUI(QMainWindow):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle('LSM Control')
+        self.setWindowTitle('SPIM Control')
 
         # Create the canvas for the camera
         self.canvas = MplCanvas()
